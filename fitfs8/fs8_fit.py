@@ -3,6 +3,7 @@
 import iminuit
 import time
 import copy
+import os
 import numpy as np
 import pandas as pd
 from astropy.table import Table
@@ -85,6 +86,7 @@ class fs8_fitter:
         else:
             self._sigma_u = None
         self._sigma8 = sigma8
+
         self._pk_nonorm = read_power_spectrum(pow_spec,
                                               self.sigma8,
                                               pws_type)
@@ -99,7 +101,14 @@ class fs8_fitter:
         else:
             self.kmin = kmin
         self.data_mask = data_mask
-        self._data = pd.read_csv(data)
+        ext = os.path.splitext(data)[-1]
+        if ext == '.fits':
+            self._data = Table.read(data).to_pandas()
+        elif ext == '.csv':
+            self._data = pd.read_csv(data)
+        else:
+            raise ValueError('Support .csv and .fits file')
+
         self._data.rename(columns=key_dic, inplace=True)
         self._cosmo = set_cosmo(cosmo)
         self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
@@ -297,12 +306,13 @@ class fs8_fitter:
         log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
         return -log_like
 
-    def fit_iminuit(self, grid_size, minos=False, fs8_lim=(0.1, 2.),
+    def fit_iminuit(self, grid_size, use_true_vel=False,
+                    minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
 
         # Run all neccessary function
         t0 = time.time()
-        self.grid_data(grid_size)
+        self.grid_data(grid_size, use_true_vel=use_true_vel)
         t1 = time.time()
         print(f'Grid data : {t1 - t0:.2f} seconds')
         self._compute_cov()
