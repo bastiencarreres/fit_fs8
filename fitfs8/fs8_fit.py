@@ -229,7 +229,7 @@ class fs8_fitter:
         if use_true_vel:
             center_vpec = np.bincount(index,
                                       weights=data['vpec_true'],
-                                      minlength=n_pix)[mask]
+                                      minlength=n_pix)[mask]/sum_n[mask]
             center_vpec_err = np.zeros(np.sum(mask))
         else:
             # Perform averages per voxel
