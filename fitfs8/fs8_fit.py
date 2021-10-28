@@ -310,6 +310,7 @@ class fs8_fitter:
                     minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
 
+        print(f'kmin = {self.kmin}, kmax = {self.kmax}')
         # Run all neccessary function
         t0 = time.time()
         self.grid_data(grid_size, use_true_vel=use_true_vel)
@@ -319,9 +320,11 @@ class fs8_fitter:
         t2 = time.time()
         print(f'Compute cosmo covariance : {t2 - t1:.2f} seconds')
         if self.sigma_u is not None:
+            print('Use RS dampling')
             m = iminuit.Minuit(self.get_log_like, fs8=0.5, sig_v=200., sig_u=self.sigma_u)
             m.limits['sig_u'] = sigu_lim
         else:
+            print("Don't use RS dampling")
             m = iminuit.Minuit(self.get_log_like, fs8=0.5, sig_v=200., sig_u=-99.)
             m.fixed['sig_u'] = True
         m.errordef = iminuit.Minuit.LIKELIHOOD
