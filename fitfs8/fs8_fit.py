@@ -309,7 +309,7 @@ class fs8_fitter:
     def fit_iminuit(self, grid_size, use_true_vel=False,
                     minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
-
+        print(f'Grid size = {grid_size}')
         print(f'kmin = {self.kmin}, kmax = {self.kmax}')
         # Run all neccessary function
         t0 = time.time()
