@@ -202,67 +202,26 @@ class fs8_fitter:
         print(f"Apply mask : {self.data_mask if self.data_mask is not None else 'No'}")
         print(f'N sn = {len(data)}')
 
-        x = data['r_comov'] * np.cos(data['ra']) * np.cos(data['dec'])
-        y = data['r_comov'] * np.sin(data['ra']) * np.cos(data['dec'])
-        z = data['r_comov'] * np.sin(data['dec'])
-
-        position = np.array([x, y, z])
-        pos_min = np.min(position, axis=1)
-        pos_max = np.max(position, axis=1)
-
-        # Number of grid voxels per axis
-        n_grid = np.floor((pos_max - pos_min) / self.grid_size).astype(int) + 1
-
-        # Total number of voxels
-        n_pix = n_grid.prod()
-
-        # Voxel index of each catalog input on each axis
-        index = np.floor((position.T - pos_min) / self.grid_size).astype(int)
-
-        # Voxel index over total number of voxels
-        index = (index[:, 0] * n_grid[1] + index[:, 1]) * n_grid[2] + index[:, 2]
-
-        sum_n = np.bincount(index, minlength=n_pix)
-
-        # Consider only voxels with at least one galaxy
-        mask = sum_n > 0
         if use_true_vel:
-            center_vpec = np.bincount(index,
-                                      weights=data['vpec_true'],
-                                      minlength=n_pix)[mask]/sum_n[mask]
-            center_vpec_err = np.zeros(np.sum(mask))
+            vpec = self.data['vpec_true'].to_numpy()
+            vpec_err = np.zeros(vpec.size)
         else:
-            # Perform averages per voxel
-            sum_vpec = np.bincount(index,
-                                   weights=data['vpec'] / data['vpec_err']**2,
-                                   minlength=n_pix)[mask]
-            sum_we = np.bincount(index,
-                                 weights=1 / data['vpec_err']**2,
-                                 minlength=n_pix)[mask]
-            center_vpec = sum_vpec / sum_we
-            center_vpec_err = np.sqrt(1 / sum_we)
-        center_ngals = sum_n[mask]
+            vpec = self.data['vpec'].to_numpy()
+            vpec_err = self.data['vpec_err'].to_numpy()
+        grid = nbf.grid_data(self.grid_size,
+                             self.data['ra'].to_numpy(),
+                             self.data['dec'].to_numpy(),
+                             self.data['r_comov'].to_numpy(),
+                             vpec,
+                             vpec_err,
+                             use_true_vel)
 
-        # Determine the coordinates of the voxel centers
-        i_pix = np.arange(n_pix)[mask]
-        i_pix_z = i_pix % n_grid[2]
-        i_pix_y = ((i_pix - i_pix_z) / n_grid[2]) % n_grid[1]
-        i_pix_x = i_pix // (n_grid[1] * n_grid[2])
-        i_pix = [i_pix_x, i_pix_y, i_pix_z]
-        center_position = np.array([(i_pix[i] + 0.5) * self.grid_size
-                                    + pos_min[i] for i in range(3)])
-
-        # Convert to ra, dec, r_comov
-        center_r_comov = np.sqrt(np.sum(center_position**2, axis=0))
-        center_ra = np.arctan2(center_position[1], center_position[0])
-        center_dec = np.pi / 2 - np.arccos(center_position[2] / center_r_comov)
-
-        self.data_grid = {'ra': center_ra,
-                          'dec': center_dec,
-                          'r_comov': center_r_comov,
-                          'vpec': center_vpec,
-                          'vpec_err': center_vpec_err,
-                          'nobj': center_ngals}
+        self.data_grid = {'ra': grid[0],
+                          'dec': grid[1],
+                          'r_comov': grid[2],
+                          'vpec': grid[3],
+                          'vpec_err': grid[4],
+                          'nobj': grid[5]}
 
     def _grid_window(self, n=1000):
         if self.grid_size == 0:
