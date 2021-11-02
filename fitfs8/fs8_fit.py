@@ -111,11 +111,16 @@ class fs8_fitter:
 
         self._data.rename(columns=key_dic, inplace=True)
         self._cosmo = set_cosmo(cosmo)
+
+        # Comoving distance in Mpc
         self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
+
+        # Pass to Mpc.h^-1
         self._data['r_comov'] *= self._cosmo.H0.value / 100
         self.data_grid = None
         self.cov_cosmo = None
         self._grid_size = None
+        self._grid_window = None
 
     @property
     def kmax(self):
@@ -179,7 +184,7 @@ class fs8_fitter:
     def grid_data(self, grid_size, use_true_vel=False):
         self._grid_size = grid_size
         self._grid_vel(use_true_vel)
-        self._grid_window()
+        self._compute_grid_window()
 
     def _grid_vel(self, use_true_vel):
         print('Create velocities grid')
@@ -223,9 +228,10 @@ class fs8_fitter:
                           'vpec_err': grid[4],
                           'nobj': grid[5]}
 
-    def _grid_window(self, n=1000):
+    def _compute_grid_window(self, n=1000):
         if self.grid_size == 0:
-            return None
+            self._grid_window = None
+            return
 
         window = np.zeros_like(self.pk[0])
         theta = np.linspace(0, np.pi, n)
@@ -233,16 +239,16 @@ class fs8_fitter:
         kx = np.outer(np.sin(theta), np.cos(phi))
         ky = np.outer(np.sin(theta), np.sin(phi))
         kz = np.outer(np.cos(theta), np.ones(n))
-        dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
+        # dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
         for i in range(self.pk[0].size):
             ki = self.pk[0][i]
             # the factor here has an extra np.pi because of the definition of np.sinc
             fact = (ki * self.grid_size) / (2 * np.pi)
-            func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
+            func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) # * dthetaphi
             win_theta = np.trapz(func, x=phi, axis=1)
             window[i] = np.trapz(win_theta, x=theta)
             window[i] *= 1 / (4 * np.pi)
-        return window
+        self._grid_window = window
 
     def _compute_cov(self):
         self.cov_cosmo = nbf.build_covariance_matrix(self.data_grid['ra'],
@@ -250,7 +256,7 @@ class fs8_fitter:
                                                      self.data_grid['r_comov'],
                                                      self.pk[0],
                                                      self.pk[1],
-                                                     grid_win=self._grid_window(),
+                                                     grid_win=self._grid_window,
                                                      n_gals=self.data_grid['nobj'])
 
     def get_log_like(self, fs8, sig_v, sig_u=-99.):
