@@ -101,21 +101,30 @@ class fs8_fitter:
         else:
             self.kmin = kmin
         self.data_mask = data_mask
-        ext = os.path.splitext(data)[-1]
-        if ext == '.fits':
-            self._data = Table.read(data).to_pandas()
-        elif ext == '.csv':
-            self._data = pd.read_csv(data)
-        else:
-            raise ValueError('Support .csv and .fits file')
-
-        self._data.rename(columns=key_dic, inplace=True)
         self._cosmo = set_cosmo(cosmo)
-        self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
-        self._data['r_comov'] *= self._cosmo.H0.value / 100
+
+        self._init_data(data, key_dic)
+
         self.data_grid = None
         self.cov_cosmo = None
         self._grid_size = None
+
+    def _init_data(self, data, key_dic):
+        if isinstance(data, str):
+            ext = os.path.splitext(data)[-1]
+            if ext == '.fits':
+                self._data = Table.read(data).to_pandas()
+            elif ext == '.csv':
+                self._data = pd.read_csv(data)
+            else:
+                raise ValueError('Support .csv and .fits file')
+
+        elif isinstance(data, pd.core.frame.DataFrame):
+            self._data = data
+
+        self._data.rename(columns=key_dic, inplace=True)
+        self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
+        self._data['r_comov'] *= self._cosmo.H0.value / 100
 
     @property
     def kmax(self):
