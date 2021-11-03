@@ -15,7 +15,7 @@ def j0_alt(x):
 
 @njit(cache=True)
 def j2_alt(x):
-    return (3/x**2-1)*np.sin(x)/x - 3*np.cos(x)/x**2
+    return (3 / x**2 - 1) * np.sin(x)/x - 3 * np.cos(x) / x**2
 
 
 @njit(cache=True)
@@ -28,12 +28,11 @@ def window(k, r_0, r_1, cos_alpha):
     ''' From Johnson et al. 2014 '''
     r = separation(r_0, r_1, cos_alpha)
     sin_alpha_squared = 1 - cos_alpha**2
-    win = np.outer(1/3 * np.ones_like(k), np.ones(r_1.size))
-    rpos = r > 0
-    j0kr = j0_alt(np.outer(k, r[rpos]))
-    j2kr = j2_alt(np.outer(k, r[rpos]))
-    win[:, rpos] = 1/3 * (j0kr - 2 * j2kr)*cos_alpha[rpos]
-    win[:, rpos] += (r_0 * r_1[rpos] / r[rpos]**2 * sin_alpha_squared[rpos] * j2kr)
+    win = np.outer(1 / 3 * np.ones_like(k), np.ones(r_1.size))
+    j0kr = j0_alt(np.outer(k, r))
+    j2kr = j2_alt(np.outer(k, r))
+    win = 1 / 3 * (j0kr - 2 * j2kr) * cos_alpha
+    win += j2kr * r_0 * r_1 / r**2 * sin_alpha_squared
     return win
 
 
@@ -57,9 +56,10 @@ def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, grid_win=None, n_gal
     nh = ra.size
     cov_matrix = np.zeros((nh, nh))
     if grid_win is not None:
-        pk = pk_nogrid*grid_win**2
+        print('Apply grid window')
+        pk = pk_nogrid * grid_win**2
     else:
-        pk = pk_nogrid*1
+        pk = pk_nogrid * 1
 
     for i in prange(nh):
         cov = get_covariance(ra[i], dec[i], r_comov[i], ra[i+1:], dec[i+1:], r_comov[i+1:], k, pk)
@@ -67,17 +67,17 @@ def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, grid_win=None, n_gal
         cov_matrix[i+1:, i] = cov
 
     # For diagonal, window = 1/3
-    var = np.trapz(pk/3, x=k)
+    var = np.trapz(pk / 3, x=k)
 
     np.fill_diagonal(cov_matrix, var)
 
     if grid_win is not None:
         var_nogrid = np.trapz(pk_nogrid / 3, x=k)
         # Eq. 22 of Howlett et al. 2017
-        np.fill_diagonal(cov_matrix, var + (var_nogrid-var)/n_gals)
+        np.fill_diagonal(cov_matrix, var + (var_nogrid - var) / n_gals)
 
     # Pre-factor H0^2/(2pi^2)
-    cov_matrix *= (100)**2/(2*np.pi**2)
+    cov_matrix *= (100)**2 / (2 * np.pi**2)
     return cov_matrix
 
 
@@ -151,7 +151,7 @@ def log_likelihood(x, cova):
     nx = x.size
     eigvals = np.linalg.eigvalsh(cova)
     chi2 = x.T @ np.linalg.solve(cova, x)
-    log_like = -0.5*(nx*np.log(2*np.pi)
-                     + np.sum(np.log(eigvals))
-                     + chi2)
+    log_like = -0.5 * (nx * np.log(2*np.pi)
+                       + np.sum(np.log(eigvals))
+                       + chi2)
     return log_like
