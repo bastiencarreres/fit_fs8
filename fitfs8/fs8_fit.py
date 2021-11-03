@@ -101,26 +101,31 @@ class fs8_fitter:
         else:
             self.kmin = kmin
         self.data_mask = data_mask
-        ext = os.path.splitext(data)[-1]
-        if ext == '.fits':
-            self._data = Table.read(data).to_pandas()
-        elif ext == '.csv':
-            self._data = pd.read_csv(data)
-        else:
-            raise ValueError('Support .csv and .fits file')
-
-        self._data.rename(columns=key_dic, inplace=True)
         self._cosmo = set_cosmo(cosmo)
 
-        # Comoving distance in Mpc
-        self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
+        self._init_data(data, key_dic)
 
-        # Pass to Mpc.h^-1
-        self._data['r_comov'] *= self._cosmo.H0.value / 100
         self.data_grid = None
         self.cov_cosmo = None
         self._grid_size = None
         self._grid_window = None
+
+    def _init_data(self, data, key_dic):
+        if isinstance(data, str):
+            ext = os.path.splitext(data)[-1]
+            if ext == '.fits':
+                self._data = Table.read(data).to_pandas()
+            elif ext == '.csv':
+                self._data = pd.read_csv(data)
+            else:
+                raise ValueError('Support .csv and .fits file')
+
+        elif isinstance(data, pd.core.frame.DataFrame):
+            self._data = data
+
+        self._data.rename(columns=key_dic, inplace=True)
+        self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
+        self._data['r_comov'] *= self._cosmo.H0.value / 100
 
     @property
     def kmax(self):
@@ -239,12 +244,12 @@ class fs8_fitter:
         kx = np.outer(np.sin(theta), np.cos(phi))
         ky = np.outer(np.sin(theta), np.sin(phi))
         kz = np.outer(np.cos(theta), np.ones(n))
-        # dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
+        dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
         for i in range(self.pk[0].size):
             ki = self.pk[0][i]
             # the factor here has an extra np.pi because of the definition of np.sinc
             fact = (ki * self.grid_size) / (2 * np.pi)
-            func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) # * dthetaphi
+            func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
             win_theta = np.trapz(func, x=phi, axis=1)
             window[i] = np.trapz(win_theta, x=theta)
             window[i] *= 1 / (4 * np.pi)
