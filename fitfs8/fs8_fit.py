@@ -238,22 +238,10 @@ class fs8_fitter:
             self._grid_window = None
             return
 
-        window = np.zeros_like(self.pk[0])
-        theta = np.linspace(0, np.pi, n)
-        phi = np.linspace(0, 2 * np.pi, n)
-        kx = np.outer(np.sin(theta), np.cos(phi))
-        ky = np.outer(np.sin(theta), np.sin(phi))
-        kz = np.outer(np.cos(theta), np.ones(n))
-        dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
-        for i in range(self.pk[0].size):
-            ki = self.pk[0][i]
-            # the factor here has an extra np.pi because of the definition of np.sinc
-            fact = (ki * self.grid_size) / (2 * np.pi)
-            func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
-            win_theta = np.trapz(func, x=phi, axis=1)
-            window[i] = np.trapz(win_theta, x=theta)
-            window[i] *= 1 / (4 * np.pi)
-        self._grid_window = window
+        self._grid_window = nbf.compute_grid_window(self.grid_size,
+                                                    self.pk[0],
+                                                    self.pk[1],
+                                                    n)
 
     def _compute_cov(self):
         self.cov_cosmo = nbf.build_covariance_matrix(self.data_grid['ra'],

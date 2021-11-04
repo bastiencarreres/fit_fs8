@@ -143,6 +143,27 @@ def grid_data(grid_size, ra, dec, r_comov, vpec, vpec_err, use_true_vel):
     return center_ra, center_dec, center_r_comov, center_vpec, center_vpec_err, center_ngals
 
 
+@njit(cache=True, parallel=True)
+def compute_grid_window(grid_size, k, pk, n):
+    window = np.zeros_like(k)
+    theta = np.linspace(0, np.pi, n)
+    phi = np.linspace(0, 2 * np.pi, n)
+    kx = np.outer(np.sin(theta), np.cos(phi))
+    ky = np.outer(np.sin(theta), np.sin(phi))
+    kz = np.outer(np.cos(theta), np.ones(n))
+
+    # Forgotten in Howlett et al. formula
+    # we add spherical coordinate solid angle element
+    dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
+    for i in prange(k.size):
+        # the factor here has an extra np.pi because of the definition of np.sinc
+        fact = (k[i] * grid_size) / (2 * np.pi)
+        func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
+        win_theta = np.trapz(func, x=phi)
+        window[i] = np.trapz(win_theta, x=theta)
+        window[i] *= 1 / (4 * np.pi)
+
+
 @njit(cache=True)
 def log_likelihood(x, cova):
     ''' Computes log of the likelihood from
