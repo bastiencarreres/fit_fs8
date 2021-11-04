@@ -219,9 +219,9 @@ class fs8_fitter:
             vpec = self.data['vpec'].to_numpy()
             vpec_err = self.data['vpec_err'].to_numpy()
         grid = nbf.grid_data(self.grid_size,
-                             self.data['ra'].to_numpy(),
-                             self.data['dec'].to_numpy(),
-                             self.data['r_comov'].to_numpy(),
+                             data['ra'].to_numpy(),
+                             data['dec'].to_numpy(),
+                             data['r_comov'].to_numpy(),
                              vpec,
                              vpec_err,
                              use_true_vel)
