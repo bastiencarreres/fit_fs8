@@ -213,11 +213,11 @@ class fs8_fitter:
         print(f'N sn = {len(data)}')
 
         if use_true_vel:
-            vpec = self.data['vpec_true'].to_numpy()
+            vpec = data['vpec_true'].to_numpy()
             vpec_err = np.zeros(vpec.size)
         else:
-            vpec = self.data['vpec'].to_numpy()
-            vpec_err = self.data['vpec_err'].to_numpy()
+            vpec = data['vpec'].to_numpy()
+            vpec_err = data['vpec_err'].to_numpy()
         grid = nbf.grid_data(self.grid_size,
                              data['ra'].to_numpy(),
                              data['dec'].to_numpy(),
