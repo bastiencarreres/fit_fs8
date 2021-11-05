@@ -240,7 +240,6 @@ class fs8_fitter:
 
         self._grid_window = nbf.compute_grid_window(self.grid_size,
                                                     self.pk[0],
-                                                    self.pk[1],
                                                     n)
 
     def _compute_cov(self):

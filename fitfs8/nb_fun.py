@@ -144,7 +144,7 @@ def grid_data(grid_size, ra, dec, r_comov, vpec, vpec_err, use_true_vel):
 
 
 @njit(cache=True, parallel=True)
-def compute_grid_window(grid_size, k, pk, n):
+def compute_grid_window(grid_size, k, n):
     window = np.zeros_like(k)
     theta = np.linspace(0, np.pi, n)
     phi = np.linspace(0, 2 * np.pi, n)
@@ -161,7 +161,8 @@ def compute_grid_window(grid_size, k, pk, n):
         func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
         win_theta = np.trapz(func, x=phi)
         window[i] = np.trapz(win_theta, x=theta)
-        window[i] *= 1 / (4 * np.pi)
+    window *= 1 / (4 * np.pi)
+    return window
 
 
 @njit(cache=True)
