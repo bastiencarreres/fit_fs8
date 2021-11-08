@@ -58,7 +58,10 @@ def read_power_spectrum(pow_spec,
     # Read power spectrum from camb
     # units are in h/Mpc and Mpc^3/h^3
     if pws_type.lower() in ['bel']:
-        pk_table = Table.read(pow_spec, format='ascii', names=('k', 'power'))
+        if isinstance(pow_spec, str):
+            pk_table = Table.read(pow_spec, format='ascii', names=('k', 'power'))
+        else:
+            pk_table = pow_spec
         k = pk_table['k']
         pk = pk_table['power']
 
