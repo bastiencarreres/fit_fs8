@@ -58,16 +58,12 @@ def read_power_spectrum(pow_spec,
     # Read power spectrum from camb
     # units are in h/Mpc and Mpc^3/h^3
     if pws_type.lower() in ['bel']:
-        if isinstance(pow_spec, str):
-            pk_table = Table.read(pow_spec, format='ascii', names=('k', 'power'))
-        else:
-            pk_table = pow_spec
+        pk_table = Table.read(pow_spec, format='ascii', names=('k', 'power'))
         k = pk_table['k']
         pk = pk_table['power']
 
     elif pws_type.lower() == 'regpt':
-        k, pdd, pdt, ptt = np.loadtxt(pow_spec, unpack=1)
-        pk = ptt
+        k, pk = np.loadtxt(pow_spec)
 
     # Apply non-linearities from Bel et al. 2019
     if pws_type.lower() == 'bel':
@@ -78,7 +74,6 @@ def read_power_spectrum(pow_spec,
         pk = pk * np.exp(-k * (a1 + a2 * k + a3 * k**2))
 
     return k, pk
-
 
 class fs8_fitter:
     def __init__(self, pow_spec, sigma8, data, pws_type='regpt',
