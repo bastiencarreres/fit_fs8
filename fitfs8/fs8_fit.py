@@ -208,6 +208,7 @@ class fs8_fitter:
         if use_true:
             print('Use True val')
             key += '_true'
+            nanerrmask = np.ones(len(data[key]), dtype='bool')
         else:
             nanerrmask = ~np.isnan(data[key + '_err'])
             nanerrmask &= data[key + '_err'] > 0
@@ -234,11 +235,17 @@ class fs8_fitter:
                              err,
                              use_true)
 
+        z = np.linspace(0, self._data['zobs'].max() + 0.5, 1000)
+
+        rcomo = self._cosmo.comoving_distance(z).value
+        rcomo *= self._cosmo.H0.value / 100
+
         self.data_grid = {'ra': grid[0],
                           'dec': grid[1],
                           'r_comov': grid[2],
-                          'vpec': grid[3],
-                          'vpec_err': grid[4],
+                          'z': np.interp(grid[2], rcomo, z),
+                          'vel_dmu': grid[3],
+                          'err': grid[4],
                           'nobj': grid[5]}
 
     def _compute_grid_window(self, n=1000):
@@ -250,7 +257,7 @@ class fs8_fitter:
                                                     self.pk[0],
                                                     n)
 
-    def _compute_cov(self):
+    def _compute_cov(self, use_mu=False):
         self.cov_cosmo = nbf.build_covariance_matrix(self.data_grid['ra'],
                                                      self.data_grid['dec'],
                                                      self.data_grid['r_comov'],
@@ -258,6 +265,12 @@ class fs8_fitter:
                                                      self.pk[1],
                                                      grid_win=self._grid_window,
                                                      n_gals=self.data_grid['nobj'])
+        if use_mu:
+            Hr = self._cosmo.H(self.data_grid['z']).value * self._cosmo.comoving_distance(self.data_grid['z']).value
+            self.J = np.diag(5 / np.log(10) * (1 + self.data_grid['z']) / Hr)
+            self.cov_cosmo = self.J @ self.cov_cosmo @ self.J.T
+        else:
+            self.J = None
 
     def get_log_like(self, fs8, sig_v, sig_u=-99.):
         if sig_u != -99.:
@@ -266,14 +279,11 @@ class fs8_fitter:
         diag_cosmo = np.diag(self.cov_cosmo)
         cov_matrix = self.cov_cosmo * fs8**2
         diag_tot = diag_cosmo * fs8**2 + sig_v**2 / self.data_grid['nobj']
-        diag_tot += self.data_grid['vpec_err']**2
+        diag_tot += self.data_grid['err']**2
         np.fill_diagonal(cov_matrix, diag_tot)
-        log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
+        log_like = nbf.log_likelihood(self.data_grid['vel_dmu'], cov_matrix)
         return -log_like
 
-<<<<<<< HEAD
-    def fit_iminuit(self, grid_size, use_true_vel=False, use_mu=False,
-=======
     def get_log_like(self, x):
         if len(x) == 2:
             fs8, sig_v = x
@@ -283,40 +293,40 @@ class fs8_fitter:
             self._compute_cov()
         else:
             raise ValueError
-        diag_cosmo = np.diag(self.cov_cosmo)
         cov_matrix = self.cov_cosmo * fs8**2
-        diag_tot = diag_cosmo * fs8**2 + sig_v**2 / self.data_grid['nobj']
-        diag_tot += self.data_grid['vpec_err']**2
-        np.fill_diagonal(cov_matrix, diag_tot)
-        log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
+        diag_add = sig_v**2 / self.data_grid['nobj']
+        if self.J is not None:
+            diag_add = np.diag(self.J)**2 * diag_add
+        diag_add += self.data_grid['err']**2
+        cov_matrix += np.diag(diag_add)
+        log_like = nbf.log_likelihood(self.data_grid['vel_dmu'], cov_matrix)
         return log_like
-    
+
     def neg_log_like(self, x):
         return -self.get_log_like(x)
-    
-    def fit_iminuit(self, grid_size, use_true_vel=False,
->>>>>>> 2f853b35008b6acaf5fc0720f99dde507989eccd
+
+    def fit_iminuit(self, grid_size, use_true=False, use_mu=False,
                     minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
         print(f'Grid size = {grid_size}')
         print(f'kmin = {self.kmin}, kmax = {self.kmax}')
         # Run all neccessary function
         t0 = time.time()
-        self.grid_data(grid_size, use_true_vel=use_true_vel, use_mu=use_mu)
+        self.grid_data(grid_size, use_true=use_true, use_mu=use_mu)
         t1 = time.time()
         print(f'Grid data : {t1 - t0:.2f} seconds')
-        self._compute_cov()
+        self._compute_cov(use_mu=use_mu)
         t2 = time.time()
         print(f'Compute cosmo covariance : {t2 - t1:.2f} seconds')
         if self.sigma_u is not None:
             print('Use RS dampling')
-            name=("fs8", "sig_v", "sig_u")
+            name = ("fs8", "sig_v", "sig_u")
             init = [0.5, 200., 13.]
             m = iminuit.Minuit(self.neg_log_like, init, name=name)
             m.limits['sig_u'] = sigu_lim
         else:
             print("Don't use RS dampling")
-            name=("fs8", "sig_v")
+            name = ("fs8", "sig_v")
             init = [0.5, 200.]
             m = iminuit.Minuit(self.neg_log_like, init, name=name)
         m.errordef = iminuit.Minuit.LIKELIHOOD
@@ -334,6 +344,7 @@ class fs8_fitter:
             t5 = time.time()
             print(f'Minos error : {(t5 - t4) / 60:.2f} minutes')
         return m
+
     def plot_pk(self, **kwargs):
         plt.figure()
         plt.title("Power Spectrum")
