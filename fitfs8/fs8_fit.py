@@ -261,6 +261,26 @@ class fs8_fitter:
         log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
         return -log_like
 
+    def get_log_like(self, x):
+        if len(x) == 2:
+            fs8, sig_v = x
+        elif len(x) ==3:
+            fs8, sig_v, sig_u = x
+            self._sigma_u = sig_u
+            self._compute_cov()
+        else:
+            raise ValueError
+        diag_cosmo = np.diag(self.cov_cosmo)
+        cov_matrix = self.cov_cosmo * fs8**2
+        diag_tot = diag_cosmo * fs8**2 + sig_v**2 / self.data_grid['nobj']
+        diag_tot += self.data_grid['vpec_err']**2
+        np.fill_diagonal(cov_matrix, diag_tot)
+        log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
+        return log_like
+    
+    def neg_log_like(self, x):
+        return -self.get_log_like(x)
+    
     def fit_iminuit(self, grid_size, use_true_vel=False,
                     minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
@@ -276,12 +296,15 @@ class fs8_fitter:
         print(f'Compute cosmo covariance : {t2 - t1:.2f} seconds')
         if self.sigma_u is not None:
             print('Use RS dampling')
-            m = iminuit.Minuit(self.get_log_like, fs8=0.5, sig_v=200., sig_u=self.sigma_u)
+            name=("fs8", "sig_v", "sig_u")
+            init = [0.5, 200., 13.]
+            m = iminuit.Minuit(self.neg_log_like, init, name=name)
             m.limits['sig_u'] = sigu_lim
         else:
             print("Don't use RS dampling")
-            m = iminuit.Minuit(self.get_log_like, fs8=0.5, sig_v=200., sig_u=-99.)
-            m.fixed['sig_u'] = True
+            name=("fs8", "sig_v")
+            init = [0.5, 200.]
+            m = iminuit.Minuit(self.neg_log_like, init, name=name)
         m.errordef = iminuit.Minuit.LIKELIHOOD
         m.limits['fs8'] = fs8_lim
         m.limits['sig_v'] = sigv_lim
@@ -297,7 +320,6 @@ class fs8_fitter:
             t5 = time.time()
             print(f'Minos error : {(t5 - t4) / 60:.2f} minutes')
         return m
-
     def plot_pk(self, **kwargs):
         plt.figure()
         plt.title("Power Spectrum")
