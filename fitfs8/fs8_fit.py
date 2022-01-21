@@ -184,12 +184,12 @@ class fs8_fitter:
     def data(self):
         return self._data
 
-    def grid_data(self, grid_size, use_true_vel=False):
+    def grid_data(self, grid_size, use_true=False, use_mu=False):
         self._grid_size = grid_size
-        self._grid_vel(use_true_vel)
+        self._grid_vel_mu(use_true, use_mu)
         self._compute_grid_window()
 
-    def _grid_vel(self, use_true_vel):
+    def _grid_vel_mu(self, use_true, use_mu):
         print('Create velocities grid')
         if self.grid_size == 0:
             self.data_grid = self._data
@@ -198,31 +198,41 @@ class fs8_fitter:
         data = copy.copy(self.data)
         if self.data_mask is not None:
             data.query(self.data_mask, inplace=True)
-        if use_true_vel:
-            print('Use True Vpec')
-            nanmask = ~np.isnan(data['vpec_true'])
+        if use_mu:
+            print('Use dmu')
+            key = 'dmu'
         else:
-            print('Use Vpec')
-            nanmask = ~np.isnan(data['vpec'])
-            nanmask &= ~np.isnan(data['vpec_err'])
-            nanmask &= data['vpec_err'] > 0
+            print('Use velocities')
+            key = 'vpec'
+
+        if use_true:
+            print('Use True val')
+            key += '_true'
+        else:
+            nanerrmask = ~np.isnan(data[key + '_err'])
+            nanerrmask &= data[key + '_err'] > 0
+
+        nanmask = ~np.isnan(data[key])
+        nanmask &= nanerrmask
+
         data = data[nanmask]
         print(f"Apply mask : {self.data_mask if self.data_mask is not None else 'No'}")
         print(f'N sn = {len(data)}')
 
-        if use_true_vel:
-            vpec = data['vpec_true'].to_numpy()
-            vpec_err = np.zeros(vpec.size)
+        if use_true:
+            err = np.zeros(len(data))
         else:
-            vpec = data['vpec'].to_numpy()
-            vpec_err = data['vpec_err'].to_numpy()
+            err = data[key + '_err'].to_numpy()
+
+        vel_dmu = data[key].to_numpy()
+
         grid = nbf.grid_data(self.grid_size,
                              data['ra'].to_numpy(),
                              data['dec'].to_numpy(),
                              data['r_comov'].to_numpy(),
-                             vpec,
-                             vpec_err,
-                             use_true_vel)
+                             vel_dmu,
+                             err,
+                             use_true)
 
         self.data_grid = {'ra': grid[0],
                           'dec': grid[1],
@@ -261,14 +271,14 @@ class fs8_fitter:
         log_like = nbf.log_likelihood(self.data_grid['vpec'], cov_matrix)
         return -log_like
 
-    def fit_iminuit(self, grid_size, use_true_vel=False,
+    def fit_iminuit(self, grid_size, use_true_vel=False, use_mu=False,
                     minos=False, fs8_lim=(0.1, 2.),
                     sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
         print(f'Grid size = {grid_size}')
         print(f'kmin = {self.kmin}, kmax = {self.kmax}')
         # Run all neccessary function
         t0 = time.time()
-        self.grid_data(grid_size, use_true_vel=use_true_vel)
+        self.grid_data(grid_size, use_true_vel=use_true_vel, use_mu=use_mu)
         t1 = time.time()
         print(f'Grid data : {t1 - t0:.2f} seconds')
         self._compute_cov()

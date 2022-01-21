@@ -82,7 +82,7 @@ def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, grid_win=None, n_gal
 
 
 @njit(cache=True)
-def grid_data(grid_size, ra, dec, r_comov, vpec, vpec_err, use_true_vel):
+def grid_data(grid_size, ra, dec, r_comov, val, err, use_true):
     x = r_comov * np.cos(ra) * np.cos(dec)
     y = r_comov * np.sin(ra) * np.cos(dec)
     z = r_comov * np.sin(dec)
@@ -108,21 +108,21 @@ def grid_data(grid_size, ra, dec, r_comov, vpec, vpec_err, use_true_vel):
 
     # Consider only voxels with at least one galaxy
     mask = sum_n > 0
-    if use_true_vel:
-        center_vpec = np.bincount(index,
-                                  weights=vpec,
-                                  minlength=n_pix)[mask] / sum_n[mask]
-        center_vpec_err = np.zeros(np.sum(mask))
+    if use_true:
+        center_val = np.bincount(index,
+                                 weights=val,
+                                 minlength=n_pix)[mask] / sum_n[mask]
+        center_err = np.zeros(np.sum(mask))
     else:
         # Perform averages per voxel
-        sum_vpec = np.bincount(index,
-                               weights=vpec / vpec_err**2,
-                               minlength=n_pix)[mask]
+        sum_val = np.bincount(index,
+                              weights=val / err**2,
+                              minlength=n_pix)[mask]
         sum_we = np.bincount(index,
-                             weights=1 / vpec_err**2,
+                             weights=1 / err**2,
                              minlength=n_pix)[mask]
-        center_vpec = sum_vpec / sum_we
-        center_vpec_err = np.sqrt(1 / sum_we)
+        center_val = sum_val / sum_we
+        center_err = np.sqrt(1 / sum_we)
     center_ngals = sum_n[mask]
 
     # Determine the coordinates of the voxel centers
@@ -140,7 +140,7 @@ def grid_data(grid_size, ra, dec, r_comov, vpec, vpec_err, use_true_vel):
     center_ra = np.arctan2(cp_y, cp_x)
     center_dec = np.arcsin(cp_z / center_r_comov)
 
-    return center_ra, center_dec, center_r_comov, center_vpec, center_vpec_err, center_ngals
+    return center_ra, center_dec, center_r_comov, center_val, center_err, center_ngals
 
 
 @njit(cache=True, parallel=True)
