@@ -115,6 +115,8 @@ class fs8_fitter:
                 self._data = Table.read(data).to_pandas()
             elif ext == '.csv':
                 self._data = pd.read_csv(data)
+            elif ext == '.parquet':
+                self._data = pd.read_parquet(data)
             else:
                 raise ValueError('Support .csv and .fits file')
 
