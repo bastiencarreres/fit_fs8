@@ -37,24 +37,29 @@ def window(k, r_0, r_1, cos_alpha):
 
 
 @njit(cache=True)
-def get_covariance(ra_0, dec_0, r_comov_0, ra_1, dec_1, r_comov_1, k, pk):
+def get_covariance(ra_0, dec_0, r_comov_0, ra_1, dec_1, r_comov_1, k, pk, kbin):
     ''' Get cosmological covariance for a given pair of galaxies
         and a given power spectrum (k, pk) in units of h/Mpc and (Mpc/h)^3
     '''
     cos_alpha = angle_between(ra_0, dec_0, ra_1, dec_1)
     win = window(k, r_comov_0, r_comov_1, cos_alpha)
-    cova = np.trapz(win.T * pk, x=k)
+    cova = []
+    pint = win.T * pk
+    for km, kM in zip(kbin[:-1], kbin[1:]):
+        kmask = (km <= k) & (k < kM)
+        pintk = pint.T[kmask].T
+        cova.append(np.trapz(pintk, x=k[kmask]))
     return cova
 
 
 @njit(cache=True, parallel=True)
-def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, grid_win=None, n_gals=None):
+def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, kbin, grid_win=None, n_gals=None):
     ''' Builds a 2d array with the theoretical covariance matrix
         based on the positions of galaxies (ra, dec, r_comov)
         and a given power spectrum (k, pk)
     '''
-    nh = ra.size
-    cov_matrix = np.zeros((nh, nh))
+    nh = len(ra)
+    cov_matrix = np.zeros((len(kbin) - 1, nh, nh))
     if grid_win is not None:
         print('Apply grid window')
         pk = pk_nogrid * grid_win**2
@@ -62,27 +67,30 @@ def build_covariance_matrix(ra, dec, r_comov, k, pk_nogrid, grid_win=None, n_gal
         pk = pk_nogrid * 1
 
     for i in prange(nh):
-        cov = get_covariance(ra[i], dec[i], r_comov[i], ra[i+1:], dec[i+1:], r_comov[i+1:], k, pk)
-        cov_matrix[i, i+1:] = cov
-        cov_matrix[i+1:, i] = cov
+        cov = get_covariance(ra[i], dec[i], r_comov[i], ra[i+1:], dec[i+1:], r_comov[i+1:],
+                             k, pk, kbin)
+        for j in range(len(cov)):
+            cov_matrix[j][i, i+1:] = cov[j]
+            cov_matrix[j][i+1:, i] = cov[j]
 
-    # For diagonal, window = 1/3
-    var = np.trapz(pk / 3, x=k)
+    for i in range(len(kbin) - 1):
+        kmask = (kbin[i] <= k) & (k < kbin[i+1])
+        # For diagonal, window = 1/3
+        var = np.trapz(pk[kmask] / 3, x=k[kmask])
 
-    np.fill_diagonal(cov_matrix, var)
+        if grid_win is not None:
+            var_nogrid = np.trapz(pk_nogrid[kmask] / 3, x=k[kmask])
+            # Eq. 22 of Howlett et al. 2017
+            np.fill_diagonal(cov_matrix[i], var + (var_nogrid - var) / n_gals)
+        else:
+            np.fill_diagonal(cov_matrix[i], var)
 
-    if grid_win is not None:
-        var_nogrid = np.trapz(pk_nogrid / 3, x=k)
-        # Eq. 22 of Howlett et al. 2017
-        np.fill_diagonal(cov_matrix, var + (var_nogrid - var) / n_gals)
-
-    # Pre-factor H0^2/(2pi^2)
-    cov_matrix *= (100)**2 / (2 * np.pi**2)
+        # Pre-factor H0^2/(2pi^2)
+        cov_matrix[i] *= (100)**2 / (2 * np.pi**2)
     return cov_matrix
 
 
-@njit(cache=True)
-def grid_data(grid_size, ra, dec, r_comov, val, err, use_true):
+def grid_data(grid_size, ra, dec, r_comov, val, err, use_true, mean):
     x = r_comov * np.cos(ra) * np.cos(dec)
     y = r_comov * np.sin(ra) * np.cos(dec)
     z = r_comov * np.sin(dec)
@@ -115,14 +123,31 @@ def grid_data(grid_size, ra, dec, r_comov, val, err, use_true):
         center_err = np.zeros(np.sum(mask))
     else:
         # Perform averages per voxel
-        sum_val = np.bincount(index,
-                              weights=val / err**2,
-                              minlength=n_pix)[mask]
-        sum_we = np.bincount(index,
-                             weights=1 / err**2,
-                             minlength=n_pix)[mask]
-        center_val = sum_val / sum_we
-        center_err = np.sqrt(1 / sum_we)
+
+        if mean == 0:
+            # Mean as in howlett et al 2017
+
+            sum_err = np.bincount(index,
+                                  weights=err,
+                                  minlength=n_pix)[mask]
+
+            sum_val = np.bincount(index,
+                                  weights=val,
+                                  minlength=n_pix)[mask]
+
+            center_val = sum_val / sum_n[mask]
+            center_err = sum_err / sum_n[mask]**(3 / 2)
+        if mean == 1:
+            # Weighted mean
+
+            sum_val = np.bincount(index,
+                                  weights=val / err**2,
+                                  minlength=n_pix)[mask]
+            sum_we = np.bincount(index,
+                                 weights=1 / err**2,
+                                 minlength=n_pix)[mask]
+            center_val = sum_val / sum_we
+            center_err = np.sqrt(1 / sum_we)
     center_ngals = sum_n[mask]
 
     # Determine the coordinates of the voxel centers
@@ -143,7 +168,7 @@ def grid_data(grid_size, ra, dec, r_comov, val, err, use_true):
     return center_ra, center_dec, center_r_comov, center_val, center_err, center_ngals
 
 
-@njit(cache=True, parallel=True)
+@njit(cache=True)
 def compute_grid_window(grid_size, k, n):
     window = np.zeros_like(k)
     theta = np.linspace(0, np.pi, n)
@@ -155,7 +180,7 @@ def compute_grid_window(grid_size, k, n):
     # Forgotten in Howlett et al. formula
     # we add spherical coordinate solid angle element
     dthetaphi = np.outer(np.sin(theta), np.ones(phi.size))
-    for i in prange(k.size):
+    for i in range(k.size):
         # the factor here has an extra np.pi because of the definition of np.sinc
         fact = (k[i] * grid_size) / (2 * np.pi)
         func = np.sinc(fact * kx) * np.sinc(fact * ky) * np.sinc(fact * kz) * dthetaphi
@@ -165,15 +190,15 @@ def compute_grid_window(grid_size, k, n):
     return window
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def log_likelihood(x, cova):
     ''' Computes log of the likelihood from
         a vector x and a covariance cova
     '''
     nx = x.size
     eigvals = np.linalg.eigvalsh(cova)
-    chi2 = x.T @ np.linalg.solve(cova, x)
-    log_like = -0.5 * (nx * np.log(2*np.pi)
+    chi2 = np.dot(x, np.linalg.solve(cova, x))
+    log_like = -0.5 * (nx * np.log(2 * np.pi)
                        + np.sum(np.log(eigvals))
                        + chi2)
     return log_like

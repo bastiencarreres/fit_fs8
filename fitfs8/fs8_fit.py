@@ -51,43 +51,19 @@ def set_cosmo(cosmo):
         return cosmo
 
 
-def read_power_spectrum(pow_spec,
-                        sig8,
-                        pws_type=''):
+def read_power_spectrum(pow_spec):
 
     # Read power spectrum from camb
     # units are in h/Mpc and Mpc^3/h^3
-    if pws_type.lower() in ['bel']:
-        pk_table = Table.read(pow_spec, format='ascii', names=('k', 'power'))
-        k = pk_table['k']
-        pk = pk_table['power']
-
-    elif pws_type.lower() == 'regpt':
-        k, pk = np.loadtxt(pow_spec)
-
-    # Apply non-linearities from Bel et al. 2019
-    if pws_type.lower() == 'bel':
-        sig8 = 0.84648
-        a1 = -0.817+3.198 * sig8
-        a2 = 0.877 - 4.191 * sig8
-        a3 = -1.199 + 4.629 * sig8
-        pk = pk * np.exp(-k * (a1 + a2 * k + a3 * k**2))
-
+    k, pk = np.loadtxt(pow_spec)
     return k, pk
 
-class fs8_fitter:
-    def __init__(self, pow_spec, sigma8, data, pws_type='regpt',
-                 rspace_damp=False, sigma_u=13., cosmo='planck18',
-                 kmax=None, kmin=None, key_dic={}, data_mask=None):
-        if rspace_damp:
-            self._sigma_u = sigma_u
-        else:
-            self._sigma_u = None
-        self._sigma8 = sigma8
 
-        self._pk_nonorm = read_power_spectrum(pow_spec,
-                                              self.sigma8,
-                                              pws_type)
+class fs8_fitter:
+    def __init__(self, pow_spec, data, cosmo='planck18',
+                 kmax=None, kmin=None, key_dic={}, data_mask=None):
+
+        self._pk_nonorm = read_power_spectrum(pow_spec)
         self._kmax = np.inf
         self._kmin = 0.
         if kmax is None:
@@ -125,7 +101,7 @@ class fs8_fitter:
 
         self._data.rename(columns=key_dic, inplace=True)
         self._data['r_comov'] = self._cosmo.comoving_distance(self._data['zobs']).value
-        self._data['r_comov'] *= self._cosmo.H0.value / 100
+        self._data['r_comov'] *= self._cosmo.h
 
     @property
     def kmax(self):
@@ -154,13 +130,7 @@ class fs8_fitter:
         k_cut = self._pk_nonorm[0] <= self.kmax
         k_cut &= self._pk_nonorm[0] >= self.kmin
         k = self._pk_nonorm[0][k_cut]
-        if self.sigma_u is None:
-            D_u = 1
-        else:
-            # Apply redshift space dampling
-            # based on Koda et al. 2014
-            D_u = np.sin(k * self.sigma_u) / (k * self.sigma_u)
-        pk = self._pk_nonorm[1][k_cut] * D_u**2 / self.sigma8**2
+        pk = self._pk_nonorm[1][k_cut]
         return k, pk
 
     @property
@@ -186,67 +156,84 @@ class fs8_fitter:
     def data(self):
         return self._data
 
-    def grid_data(self, grid_size, use_true=False, use_mu=False):
+    def grid_data(self, grid_size, use_true=False, mean='howlett'):
         self._grid_size = grid_size
-        self._grid_vel_mu(use_true, use_mu)
+        t0 = time.time()
+        self._grid_vel_mu(use_true, mean=mean)
+        t1 = time.time()
+        print(f'{t1 - t0:.2f} s to grid data')
         self._compute_grid_window()
+        print(f'{time.time() - t1:.2f} s to compute grid window')
 
-    def _grid_vel_mu(self, use_true, use_mu):
-        print('Create velocities grid')
-        if self.grid_size == 0:
-            self.data_grid = self._data
-            return
-
+    def _grid_vel_mu(self, use_true, mean='howlett'):
         data = copy.copy(self.data)
+
         if self.data_mask is not None:
             data.query(self.data_mask, inplace=True)
-        if use_mu:
-            print('Use dmu')
-            key = 'dmu'
-        else:
-            print('Use velocities')
-            key = 'vpec'
 
         if use_true:
             print('Use True val')
-            key += '_true'
+            key = 'vpec_true'
             nanerrmask = np.ones(len(data[key]), dtype='bool')
         else:
-            nanerrmask = ~np.isnan(data[key + '_err'])
-            nanerrmask &= data[key + '_err'] > 0
+            key = 'vpec_est'
+            nanerrmask = ~np.isnan(data['vpec_err'])
+            nanerrmask &= data['vpec_err'] > 0
 
         nanmask = ~np.isnan(data[key])
         nanmask &= nanerrmask
 
         data = data[nanmask]
+
         print(f"Apply mask : {self.data_mask if self.data_mask is not None else 'No'}")
         print(f'N sn = {len(data)}')
 
         if use_true:
             err = np.zeros(len(data))
         else:
-            err = data[key + '_err'].to_numpy()
+            err = data['vpec_err'].to_numpy()
 
-        vel_dmu = data[key].to_numpy()
+        vel = data[key].to_numpy()
+
+        if self.grid_size == 0:
+            print('No grid')
+            self.data_grid = {'ra': data['ra'].to_numpy(),
+                              'dec': data['dec'].to_numpy(),
+                              'r_comov': data['r_comov'].to_numpy(),
+                              'z': data['zobs'].to_numpy(),
+                              'vel': vel,
+                              'err': err}
+            return
+
+        print('Create velocities grid')
+        if mean == 'howlett':
+            print('Use normal mean')
+            mean = 0
+        elif mean == 'weight':
+            print('Use weighted mean')
+            mean = 1
+        else:
+            raise ValueError("Mean should be 'howlett' or 'weight'")
 
         grid = nbf.grid_data(self.grid_size,
                              data['ra'].to_numpy(),
                              data['dec'].to_numpy(),
                              data['r_comov'].to_numpy(),
-                             vel_dmu,
+                             vel,
                              err,
-                             use_true)
+                             use_true,
+                             mean)
 
         z = np.linspace(0, self._data['zobs'].max() + 0.5, 1000)
 
         rcomo = self._cosmo.comoving_distance(z).value
-        rcomo *= self._cosmo.H0.value / 100
+        rcomo *= self._cosmo.h
 
         self.data_grid = {'ra': grid[0],
                           'dec': grid[1],
                           'r_comov': grid[2],
                           'z': np.interp(grid[2], rcomo, z),
-                          'vel_dmu': grid[3],
+                          'vel': grid[3],
                           'err': grid[4],
                           'nobj': grid[5]}
 
@@ -259,81 +246,82 @@ class fs8_fitter:
                                                     self.pk[0],
                                                     n)
 
-    def _compute_cov(self, use_mu=False):
+    def _compute_cov(self, kbin=None):
+        if kbin is None:
+            kbin = np.array([self.pk[0].min() * 0.999,
+                             self.pk[0].max() * 1.1])
+        if 'nobj' not in self.data_grid.keys():
+            n_gals = None
+        else:
+            n_gals = self.data_grid['nobj']
         self.cov_cosmo = nbf.build_covariance_matrix(self.data_grid['ra'],
                                                      self.data_grid['dec'],
                                                      self.data_grid['r_comov'],
                                                      self.pk[0],
                                                      self.pk[1],
+                                                     kbin,
                                                      grid_win=self._grid_window,
-                                                     n_gals=self.data_grid['nobj'])
-        if use_mu:
-            Hr = self._cosmo.H(self.data_grid['z']).value * self._cosmo.comoving_distance(self.data_grid['z']).value
-            self.J = np.diag(5 / np.log(10) * (1 + self.data_grid['z']) / Hr)
-            self.cov_cosmo = self.J @ self.cov_cosmo @ self.J.T
-        else:
-            self.J = None
-
-    def get_log_like(self, fs8, sig_v, sig_u=-99.):
-        if sig_u != -99.:
-            self._sigma_u = sig_u
-            self._compute_cov()
-        diag_cosmo = np.diag(self.cov_cosmo)
-        cov_matrix = self.cov_cosmo * fs8**2
-        diag_tot = diag_cosmo * fs8**2 + sig_v**2 / self.data_grid['nobj']
-        diag_tot += self.data_grid['err']**2
-        np.fill_diagonal(cov_matrix, diag_tot)
-        log_like = nbf.log_likelihood(self.data_grid['vel_dmu'], cov_matrix)
-        return -log_like
+                                                     n_gals=n_gals)
 
     def get_log_like(self, x):
-        if len(x) == 2:
-            fs8, sig_v = x
-        elif len(x) ==3:
-            fs8, sig_v, sig_u = x
-            self._sigma_u = sig_u
-            self._compute_cov()
+        fs8 = x[:-1]
+        sig_v = x[-1]
+
+        # Build cov matrix
+        cov_matrix = np.zeros(self.cov_cosmo[0].shape)
+        for i, f in enumerate(fs8):
+            cov_matrix += self.cov_cosmo[i] * f**2
+        if 'nobj' not in self.data_grid:
+            nobj = 1.
         else:
-            raise ValueError
-        cov_matrix = self.cov_cosmo * fs8**2
-        diag_add = sig_v**2 / self.data_grid['nobj']
-        if self.J is not None:
-            diag_add = np.diag(self.J)**2 * diag_add
+            nobj = self.data_grid['nobj']
+
+        diag_add = sig_v**2 / nobj
         diag_add += self.data_grid['err']**2
         cov_matrix += np.diag(diag_add)
-        log_like = nbf.log_likelihood(self.data_grid['vel_dmu'], cov_matrix)
+        log_like = nbf.log_likelihood(self.data_grid['vel'], cov_matrix)
         return log_like
 
     def neg_log_like(self, x):
         return -self.get_log_like(x)
 
-    def fit_iminuit(self, grid_size, use_true=False, use_mu=False,
-                    minos=False, fs8_lim=(0.1, 2.),
-                    sigv_lim=(0., 3000), sigu_lim=(0., 500.)):
+    def fit_iminuit(self, grid_size, use_true=False,
+                    minos=False, fs8_lim=(0., None),
+                    sigv_lim=(0., None), kbin=None,
+                    mean='howlett'):
+
+        if kbin is None:
+            kbin = np.array([self.pk[0].min() * 0.999,
+                             self.pk[0].max() * 1.1])
+
         print(f'Grid size = {grid_size}')
         print(f'kmin = {self.kmin}, kmax = {self.kmax}')
         # Run all neccessary function
         t0 = time.time()
-        self.grid_data(grid_size, use_true=use_true, use_mu=use_mu)
+        self.grid_data(grid_size, use_true=use_true, mean=mean)
         t1 = time.time()
         print(f'Grid data : {t1 - t0:.2f} seconds')
-        self._compute_cov(use_mu=use_mu)
+        self._compute_cov(kbin=kbin)
         t2 = time.time()
         print(f'Compute cosmo covariance : {t2 - t1:.2f} seconds')
-        if self.sigma_u is not None:
-            print('Use RS dampling')
-            name = ("fs8", "sig_v", "sig_u")
-            init = [0.5, 200., 13.]
-            m = iminuit.Minuit(self.neg_log_like, init, name=name)
-            m.limits['sig_u'] = sigu_lim
+        if len(kbin) - 1 > 1:
+            name = [f"fs8_{i}" for i in range(len(kbin) - 1)]
+            init = [0.5] * (len(kbin) - 1)
+            limits = [fs8_lim] * (len(kbin) - 1)
         else:
-            print("Don't use RS dampling")
-            name = ("fs8", "sig_v")
-            init = [0.5, 200.]
-            m = iminuit.Minuit(self.neg_log_like, init, name=name)
+            name = ["fs8"]
+            init = [0.5]
+            limits = [fs8_lim]
+
+        name.append("sig_v")
+        init.append(200.)
+        limits.append(sigv_lim)
+
+        m = iminuit.Minuit(self.neg_log_like, init, name=name)
+
         m.errordef = iminuit.Minuit.LIKELIHOOD
-        m.limits['fs8'] = fs8_lim
-        m.limits['sig_v'] = sigv_lim
+        m.limits = limits
+
         t3 = time.time()
         print(f'Init iminuit : {t3 - t2:.2f} seconds')
         print('Begin fit')
